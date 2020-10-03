@@ -15,11 +15,13 @@ type CHECK_RESULT = {
 };
 
 // LINE MESSAGE API ACCESS TOKEN
-const ACCESS_TOKEN = "【自分のアクセストーケン】";
+const ACCESS_TOKEN = "";
 // Google spread sheet id
-const SPREAD_SHEET_ID = "【自分のID】";
+const SPREAD_SHEET_ID = "";
 // Response URL
 const RESPONSE_URL = "https://api.line.me/v2/bot/message/reply";
+// Push URL
+const PUSH_URL = "https://api.line.me/v2/bot/message/push";
 
 // Message
 const MSG_INCOMPATIBLE_TYPE = "テキストで送信してください。";
@@ -78,6 +80,20 @@ function doPost(entry) {
       }
       setDataSheet(dataSheet, userSession, trimMessage);
       responseMessage = "残金: " + getLastMoneyData(dataSheet) + "円";
+
+      const userIds = getUserIds(userSheet);
+      const pushMessage = getPushMessage(
+        userSession,
+        responseMessage,
+        trimMessage
+      );
+      for (const userId of userIds) {
+        if (userId !== userSession.id) {
+          // push data
+          setPushData(userId, pushMessage);
+        }
+      }
+
       userSession.demand = "";
       userSession.comment = "";
       userSession.type = "";
@@ -130,9 +146,10 @@ function doPost(entry) {
 
   // return
   setResponseData(replyToken, responseMessage);
-  return ContentService.createTextOutput(
-    JSON.stringify({ content: "POST OK" })
-  ).setMimeType(ContentService.MimeType.JSON);
+
+  // return ContentService.createTextOutput(
+  //   JSON.stringify({ content: "POST OK" })
+  // ).setMimeType(ContentService.MimeType.JSON);
 }
 
 /**
@@ -248,6 +265,16 @@ function getUserSession(sheet: any, userId: string): USER_SESSION {
   return userSession;
 }
 
+function getUserIds(sheet: any): string[] {
+  const sheetData = sheet.getDataRange().getValues();
+  // tslint:disable-next-line: prefer-const
+  let userIds: string[] = [];
+  for (let idx = 1; idx < sheetData.length; idx++) {
+    userIds.push(sheetData[idx][0]);
+  }
+  return userIds;
+}
+
 /**
  * Set user session info to sheet
  * @param sheet set user session to sheet
@@ -311,6 +338,21 @@ function getYYYYmmddHHMMSS(): string {
   );
 }
 
+function getPushMessage(
+  userSession: USER_SESSION,
+  responseMessage: string,
+  money: string
+) {
+  return (
+    "残金に変動がありました。\n\n" +
+    userSession.type +
+    "によって" +
+    money +
+    "円の変更\n" +
+    responseMessage
+  );
+}
+
 /**
  * set input data to data sheet
  * @param sheet data sheet
@@ -371,6 +413,30 @@ function setResponseData(responseToken: string, message: string): void {
     method: "post",
     payload: JSON.stringify({
       replyToken: responseToken,
+      messages: [
+        {
+          type: "text",
+          text: message,
+        },
+      ],
+    }),
+  });
+}
+
+/**
+ * Set push data to response header
+ * @param responseToken response token
+ * @param message response message
+ */
+function setPushData(toUserId: string, message: string): void {
+  UrlFetchApp.fetch(PUSH_URL, {
+    headers: {
+      "Content-Type": "application/json; charaset=UTF-8",
+      Authorization: "Bearer " + ACCESS_TOKEN,
+    },
+    method: "post",
+    payload: JSON.stringify({
+      to: toUserId,
       messages: [
         {
           type: "text",
