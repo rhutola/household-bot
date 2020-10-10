@@ -1,315 +1,255 @@
-// User session model
-type USER_SESSION = {
-  id: string;
-  sheetRow: number;
-  type: string;
-  comment: string;
-  demand: string;
-  accessTime: string;
-};
+// Define token or url
+const ACCESS_TOKEN = "";
+const SPREAD_SHEET_ID = "";
+const RESPONSE_URL = "https://api.line.me/v2/bot/message/reply";
+const PUSH_URL = "https://api.line.me/v2/bot/message/push";
 
-// check result model
-type CHECK_RESULT = {
+// Define message type
+const TYPE_ELECTRICITY: string = "電気";
+const TYPE_WATER: string = "水道";
+const TYPE_CONNECT: string = "通信";
+const TYPE_FOOD: string = "食費";
+const TYPE_OTHER: string = "その他";
+const TYPE_PEYMENT: string = "入金";
+const TYPE_NOW: string = "現在";
+const TYPE_CLEAR: string = "入力情報-CLEAR";
+
+// Define demand type
+const DEMAND_MONEY: string = "money";
+const DEMAND_COMMENT: string = "comment";
+const DEMAND_TYPE: string = "type";
+
+// Definition message
+const MSG_SESSION_CLEAR: string = "入力情報をクリアしました。";
+const MSG_INCOMPATIBLE_TYPE: string = "テキストで送信してください。";
+const MSG_INPUT_MONEY: string = "金額を入力してください。";
+const MSG_NUM_MONEY: string = "金額は数値で入力してください。";
+const MSG_INPUT_COMMENT: string = "詳細を入力してください。";
+const MSG_SELECT_TYPE: string =
+  "以下のいずれかを入力してください。\n" +
+  TYPE_ELECTRICITY +
+  "\n" +
+  TYPE_WATER +
+  "\n" +
+  TYPE_CONNECT +
+  "\n" +
+  TYPE_FOOD +
+  "\n" +
+  TYPE_OTHER +
+  "\n" +
+  TYPE_NOW;
+
+// Definition type
+type VALIDATION_RESULT = {
   result: boolean;
   message: string;
 };
 
-// LINE MESSAGE API ACCESS TOKEN
-const ACCESS_TOKEN = "";
-// Google spread sheet id
-const SPREAD_SHEET_ID = "";
-// Response URL
-const RESPONSE_URL = "https://api.line.me/v2/bot/message/reply";
-// Push URL
-const PUSH_URL = "https://api.line.me/v2/bot/message/push";
-
-// Message
-const MSG_INCOMPATIBLE_TYPE = "テキストで送信してください。";
-const MSG_SELECT_TYPE =
-  "電気・水道・通信・食費・その他・入金・現在のいずれかを入力してください。";
-const MSG_NUM_MONEY = "金額は数値で入力してください。";
-const MSG_INPUT_MONEY = "金額を入力してください。";
-const MSG_INPUT_COMMENT = "詳細を入力してください。";
-
 /**
- * main function
- * @param entry
+ * User session Info
+ * session info  is listed in spread sheet.
  */
-function doPost(entry) {
-  const request = JSON.parse(entry.postData.contents).events[0];
+class UserSession {
+  // user id
+  public id: string;
+  // description line
+  public sheetRow: number;
+  // input type
+  public type: string;
+  // input comment
+  public comment: string;
+  // Expected value
+  public demand: string;
+  // access time
+  public accessTime: string;
+  // sheet where session info is recorded
+  private sessionSheet: any;
 
-  // response token is not defined.
-  if (typeof request.replyToken === "undefined") {
-    return;
+  /**
+   * Constructor
+   * @param id user id
+   */
+  constructor(id: string) {
+    // session info
+    this.id = id;
+    this.sheetRow = 0;
+    this.type = "";
+    this.comment = "";
+    this.demand = "";
+    this.accessTime = getYYYYmmddHHMMSS();
+
+    // session data sheet
+    this.sessionSheet = SpreadsheetApp.openById(SPREAD_SHEET_ID).getSheets()[1];
+
+    this.__readSheetData(id);
   }
 
-  // Get reply token
-  const replyToken = request.replyToken;
-
-  // Get Spread-Sheet
-  const dataSheet = SpreadsheetApp.openById(SPREAD_SHEET_ID).getSheets()[0];
-  const userSheet = SpreadsheetApp.openById(SPREAD_SHEET_ID).getSheets()[1];
-
-  // Get session
-  const userSession = getUserSession(userSheet, request.source.userId);
-
-  // message type is not 'text'
-  if (request.message.type !== "text") {
-    setResponseData(replyToken, MSG_INCOMPATIBLE_TYPE);
-    return ContentService.createTextOutput(
-      JSON.stringify({ content: "POST OK" })
-    ).setMimeType(ContentService.MimeType.JSON);
+  /**
+   * Initialize input info
+   */
+  public initialize(): void {
+    this.type = "";
+    this.comment = "";
+    this.demand = "";
   }
 
-  // Trim and get text message
-  let trimMessage = request.message.text.trim();
-
-  // Switch with session info
-  let messageRes: CHECK_RESULT;
-  let responseMessage: string;
-  switch (userSession.demand) {
-    case "money":
-      // Validation
-      trimMessage = getBeforeSpaceWord(trimMessage);
-      trimMessage = removeSign(trimMessage);
-      messageRes = checkMoneyMessage(trimMessage);
-      if (!messageRes.result) {
-        // error
-        responseMessage = messageRes.message;
-        break;
-      }
-      setDataSheet(dataSheet, userSession, trimMessage);
-      responseMessage = "残金: " + getLastMoneyData(dataSheet) + "円";
-
-      const userIds = getUserIds(userSheet);
-      const pushMessage = getPushMessage(
-        userSession,
-        responseMessage,
-        trimMessage
-      );
-      for (const userId of userIds) {
-        if (userId !== userSession.id) {
-          // push data
-          setPushData(userId, pushMessage);
-        }
-      }
-
-      userSession.demand = "";
-      userSession.comment = "";
-      userSession.type = "";
-      break;
-
-    case "comment":
-      // Validation
-      messageRes = checkCommentMessage(trimMessage);
-      if (!messageRes.result) {
-        // error
-        responseMessage = messageRes.message;
-        break;
-      }
-      responseMessage = MSG_INPUT_MONEY;
-      userSession.demand = "money";
-      userSession.comment = trimMessage;
-      break;
-
-    case "type":
-    default:
-      // Validation
-      trimMessage = getBeforeSpaceWord(trimMessage);
-      messageRes = checkTypeMessage(trimMessage);
-      if (!messageRes.result) {
-        // error
-        responseMessage = messageRes.message;
-        break;
-      }
-      if (trimMessage === "現在") {
-        responseMessage = "現在: " + getLastMoneyData(dataSheet) + "円";
-        userSession.demand = "type";
-      } else if (
-        trimMessage === "電気" ||
-        trimMessage === "水道" ||
-        trimMessage === "通信"
-      ) {
-        responseMessage = MSG_INPUT_MONEY;
-        userSession.type = trimMessage;
-        userSession.demand = "money";
-      } else {
-        responseMessage = MSG_INPUT_COMMENT;
-        userSession.type = trimMessage;
-        userSession.demand = "comment";
-      }
-      break;
-  }
-
-  // update session
-  setUserSession(userSheet, userSession);
-
-  // return
-  setResponseData(replyToken, responseMessage);
-
-  // return ContentService.createTextOutput(
-  //   JSON.stringify({ content: "POST OK" })
-  // ).setMimeType(ContentService.MimeType.JSON);
-}
-
-/**
- * Check message for type
- * @param message text message
- */
-function checkTypeMessage(message: string): CHECK_RESULT {
-  // type check
-  const checkRes: CHECK_RESULT = {
-    result: true,
-    message: "",
-  };
-  switch (message) {
-    case "電気":
-    case "水道":
-    case "通信":
-    case "食費":
-    case "その他":
-    case "入金":
-    case "現在":
-      break;
-    default:
-      checkRes.result = false;
-      checkRes.message = MSG_SELECT_TYPE;
-      break;
-  }
-
-  return checkRes;
-}
-
-/**
- * check message for comment
- * @param _message text message
- */
-function checkCommentMessage(_message: string): CHECK_RESULT {
-  const checkRes: CHECK_RESULT = {
-    result: true,
-    message: "",
-  };
-
-  return checkRes;
-}
-
-/**
- * check message for money
- * @param message text message
- */
-function checkMoneyMessage(message: string): CHECK_RESULT {
-  const numRegex = new RegExp(/^[0-9]+(\.[0-9]+)?$/);
-
-  // check
-  const checkRes: CHECK_RESULT = {
-    result: true,
-    message: "",
-  };
-  if (!numRegex.test(message)) {
-    checkRes.result = false;
-    checkRes.message = MSG_NUM_MONEY;
-  }
-
-  return checkRes;
-}
-
-/**
- * Get before whitespace word
- * @param message message text
- */
-function getBeforeSpaceWord(message: string): string {
-  if (message.match(/\s+/)) {
-    return message.split(/\s+/)[0];
-  } else {
-    return message;
-  }
-}
-
-/**
- * Remove the sign
- * @param message text message
- */
-function removeSign(message: string): string {
-  return message.replace(/,|\\/, "");
-}
-
-/**
- * find user session info in sheet.
- * @param sheet sheet data
- * @param userId request user id
- * @return session info
- */
-function getUserSession(sheet: any, userId: string): USER_SESSION {
-  const sheetData = sheet.getDataRange().getValues();
-  const userSession: USER_SESSION = {
-    id: userId,
-    sheetRow: 0,
-    type: "",
-    comment: "",
-    demand: "",
-    accessTime: "",
-  };
-
-  // Search in the sheet
-  for (let idx = 0; idx < sheetData.length; idx++) {
-    if (sheetData[idx][0] === userId) {
-      userSession.sheetRow = idx + 1;
-      userSession.type = sheetData[idx][1];
-      userSession.comment = sheetData[idx][2];
-      userSession.demand = sheetData[idx][3];
-      userSession.accessTime = sheetData[idx][4];
-      break;
+  /**
+   * Write session info to reacord sheet
+   */
+  public setSessionToSheet(): void {
+    // Add if sheetRow is 0, update otherwise
+    if (this.sheetRow === 0) {
+      this.sessionSheet.appendRow([
+        this.id,
+        this.type,
+        this.comment,
+        this.demand,
+        this.accessTime,
+      ]);
+    } else {
+      this.sessionSheet.getRange(this.sheetRow, 1).setValue(this.id);
+      this.sessionSheet.getRange(this.sheetRow, 2).setValue(this.type);
+      this.sessionSheet.getRange(this.sheetRow, 3).setValue(this.comment);
+      this.sessionSheet.getRange(this.sheetRow, 4).setValue(this.demand);
+      this.sessionSheet
+        .getRange(this.sheetRow, 5)
+        .setValue(getYYYYmmddHHMMSS());
     }
   }
 
-  return userSession;
-}
-
-function getUserIds(sheet: any): string[] {
-  const sheetData = sheet.getDataRange().getValues();
-  // tslint:disable-next-line: prefer-const
-  let userIds: string[] = [];
-  for (let idx = 1; idx < sheetData.length; idx++) {
-    userIds.push(sheetData[idx][0]);
+  /**
+   * Get user session info in Sheet
+   */
+  public getAllUserIds(): string[] {
+    const sheetData = this.sessionSheet.getDataRange().getValues();
+    const userIds: string[] = [];
+    for (let idx = 1; idx < sheetData.length; idx++) {
+      userIds.push(sheetData[idx][0]);
+    }
+    return userIds;
   }
-  return userIds;
-}
 
-/**
- * Set user session info to sheet
- * @param sheet set user session to sheet
- * @param userSession session sheet
- */
-function setUserSession(sheet: any, userSession: USER_SESSION): void {
-  if (userSession.sheetRow === 0) {
-    sheet.appendRow([
-      userSession.id,
-      userSession.type,
-      userSession.comment,
-      userSession.demand,
-      getYYYYmmddHHMMSS(),
-    ]);
-  } else {
-    const row = userSession.sheetRow;
-    sheet.getRange(row, 1).setValue(userSession.id);
-    sheet.getRange(row, 2).setValue(userSession.type);
-    sheet.getRange(row, 3).setValue(userSession.comment);
-    sheet.getRange(row, 4).setValue(userSession.demand);
-    sheet.getRange(row, 5).setValue(getYYYYmmddHHMMSS());
+  /**
+   * Read session info in record sheet
+   * @param id user id
+   */
+  private __readSheetData(id: string): void {
+    const sheetData = this.sessionSheet.getDataRange().getValues();
+    // Search in the sheet
+    for (let idx = 0; idx < sheetData.length; idx++) {
+      if (sheetData[idx][0] === id) {
+        this.sheetRow = idx + 1;
+        this.type = sheetData[idx][1];
+        this.comment = sheetData[idx][2];
+        this.demand = sheetData[idx][3];
+        this.accessTime = sheetData[idx][4];
+        break;
+      }
+    }
   }
 }
 
-/**
- * Get last money in data sheet
- * @param sheet data sheet
- */
-function getLastMoneyData(sheet: any): string {
-  const lastRow = sheet.getLastRow();
-  const sheetData = sheet.getDataRange().getValues();
+// tslint:disable-next-line: max-classes-per-file
+class Household {
+  // sheet where household info is recorded
+  private dataSheet: any;
 
-  return sheetData[lastRow - 1][7];
+  constructor() {
+    // session data sheet
+    this.dataSheet = SpreadsheetApp.openById(SPREAD_SHEET_ID).getSheets()[0];
+  }
+
+  /**
+   * Get last money in sheet
+   */
+  public getLastMoneyData(): string {
+    const lastRow = this.dataSheet.getLastRow();
+
+    return this.dataSheet.getDataRange().getValues()[lastRow - 1][7];
+  }
+
+  /**
+   * Set input data to sheet
+   * @param userSession session info
+   * @param money input money info
+   */
+  public setDataSheet(userSession: UserSession, money: string): void {
+    // define
+    const lastRow = this.dataSheet.getLastRow();
+    const sheetData = this.dataSheet.getDataRange().getValues();
+    const inputData: string[] = new Array(9);
+    let isPlus = false;
+    let moneyRow: number = 0;
+
+    // Select the description line
+    switch (userSession.type) {
+      case TYPE_PEYMENT:
+        moneyRow = 1;
+        isPlus = true;
+        break;
+      case TYPE_FOOD:
+        moneyRow = 2;
+        break;
+      case TYPE_ELECTRICITY:
+        moneyRow = 3;
+        break;
+      case TYPE_WATER:
+        moneyRow = 4;
+        break;
+      case TYPE_CONNECT:
+        moneyRow = 5;
+        break;
+      case TYPE_OTHER:
+      default:
+        moneyRow = 6;
+        break;
+    }
+
+    // Data set
+    inputData[0] = getYYYYmmdd();
+    inputData[moneyRow] = money;
+    inputData[7] = isPlus
+      ? String(Number(sheetData[lastRow - 1][7]) + Number(money))
+      : String(Number(sheetData[lastRow - 1][7]) - Number(money));
+    inputData[8] = userSession.comment;
+
+    this.dataSheet.appendRow(inputData);
+  }
 }
 
+// tslint:disable-next-line: max-classes-per-file
+class CustomLog {
+  // sheet where log info is recorded
+  private logSheet: any;
+
+  constructor() {
+    // session data sheet
+    this.logSheet = SpreadsheetApp.openById(SPREAD_SHEET_ID).getSheets()[2];
+  }
+
+  /**
+   * output to sheet
+   * @param userId user id
+   * @param message log message
+   * @param type log type
+   */
+  public outLog(userId: string, message: string, type: string = "info"): void {
+    this.logSheet.appendRow([getYYYYmmddHHMMSS(), userId, type, message]);
+  }
+
+  /**
+   * output error log to sheet
+   * @param message log message
+   */
+  public errorLog(message): void {
+    this.outLog("", message, "error");
+  }
+}
+
+// Common function
+/**
+ * Get an YYYY/mm/dd format date
+ */
 function getYYYYmmdd(): string {
   const today = new Date();
   return (
@@ -321,6 +261,9 @@ function getYYYYmmdd(): string {
   );
 }
 
+/**
+ * Get an YYYY/mm/dd HH:MM:SS format date
+ */
 function getYYYYmmddHHMMSS(): string {
   const today = new Date();
   return (
@@ -338,73 +281,132 @@ function getYYYYmmddHHMMSS(): string {
   );
 }
 
-function getPushMessage(
-  userSession: USER_SESSION,
-  responseMessage: string,
-  money: string
-) {
+/**
+ * Get push message
+ * @param type data type
+ * @param respMes response message
+ * @param money money
+ */
+function getPushMessage(type: string, respMes: string, money: string): string {
   return (
     "残金に変動がありました。\n\n" +
-    userSession.type +
+    type +
     "によって" +
     money +
     "円の変更\n" +
-    responseMessage
+    respMes
   );
 }
 
 /**
- * set input data to data sheet
- * @param sheet data sheet
- * @param userSession session data
- * @param _money money message
+ * format request message
+ * @param message request message
+ * @param demand foremat type
  */
-function setDataSheet(sheet: any, userSession: USER_SESSION, money: string) {
-  const lastRow = sheet.getLastRow();
-  const sheetData = sheet.getDataRange().getValues();
-  const inputData: string[] = new Array(9);
-  let isPlus = false;
-
-  inputData[0] = getYYYYmmdd();
-  switch (userSession.type) {
-    case "入金":
-      inputData[1] = money;
-      isPlus = true;
+function formatMessage(message: string, demand: string): string {
+  let resultMessage: string = "";
+  switch (demand) {
+    case DEMAND_MONEY:
+      resultMessage = getWordInString(message);
+      resultMessage = getNoSignString(resultMessage);
       break;
-    case "食費":
-      inputData[2] = money;
+    case DEMAND_TYPE:
+      resultMessage = getWordInString(message);
       break;
-    case "電気":
-      inputData[3] = money;
-      break;
-    case "水道":
-      inputData[4] = money;
-      break;
-    case "通信":
-      inputData[5] = money;
-      break;
-    case "その他":
-      inputData[6] = money;
+    case DEMAND_COMMENT:
+    default:
+      resultMessage = message;
       break;
   }
-
-  if (isPlus) {
-    inputData[7] = String(Number(sheetData[lastRow - 1][7]) + Number(money));
-  } else {
-    inputData[7] = String(Number(sheetData[lastRow - 1][7]) - Number(money));
-  }
-
-  inputData[8] = userSession.comment;
-
-  sheet.appendRow(inputData);
+  return resultMessage;
 }
 
 /**
- * Set JOSN data to response header
- * @param responseToken response token
+ * Get word before line break or space
+ * @param message target message
+ */
+function getWordInString(message: string): string {
+  let word: string = "";
+
+  word = message.match(/\n+/) ? message.split(/\n+/)[0] : message;
+  word = word.match(/\s+/) ? word.split(/\s+/)[0] : word;
+
+  return word;
+}
+
+/**
+ * Remove the sign
+ * @param message text message
+ */
+function getNoSignString(message: string): string {
+  return message.replace(/,|\\/, "");
+}
+
+/**
+ * Validation
+ * @param message validate message
+ * @param demand validate type
+ */
+function validate(message: string, demand: string): VALIDATION_RESULT {
+  const validationResult: VALIDATION_RESULT = {
+    result: true,
+    message: "",
+  };
+
+  switch (demand) {
+    case DEMAND_MONEY:
+      if (!checkMoneyMessage(message)) {
+        validationResult.result = false;
+        validationResult.message = MSG_NUM_MONEY;
+      }
+      break;
+    case DEMAND_COMMENT:
+      break;
+    case DEMAND_TYPE:
+    default:
+      if (!checkTypeMessage(message)) {
+        validationResult.result = false;
+        validationResult.message = MSG_SELECT_TYPE;
+      }
+      break;
+  }
+
+  return validationResult;
+}
+
+/**
+ * check message for money
+ * @param message text
+ */
+function checkMoneyMessage(message: string): boolean {
+  const numRegex = new RegExp(/^[0-9]+(\.[0-9]+)?$/);
+  return numRegex.test(message);
+}
+
+/**
+ * check message for type
+ * @param message text
+ */
+function checkTypeMessage(message: string): boolean {
+  const typeArr = [
+    TYPE_ELECTRICITY,
+    TYPE_WATER,
+    TYPE_CONNECT,
+    TYPE_FOOD,
+    TYPE_OTHER,
+    TYPE_PEYMENT,
+    TYPE_NOW,
+  ];
+
+  return typeArr.includes(message);
+}
+
+/**
+ * fetch to response url
+ * @param responseToken reply token in request data
  * @param message response message
  */
-function setResponseData(responseToken: string, message: string): void {
+function toResponse(responseToken: string, message: string): void {
   UrlFetchApp.fetch(RESPONSE_URL, {
     headers: {
       "Content-Type": "application/json; charaset=UTF-8",
@@ -424,11 +426,11 @@ function setResponseData(responseToken: string, message: string): void {
 }
 
 /**
- * Set push data to response header
- * @param responseToken response token
- * @param message response message
+ * fetch to push url
+ * @param toUserId destination UserID
+ * @param message push message
  */
-function setPushData(toUserId: string, message: string): void {
+function toPush(toUserId: string, message: string): void {
   UrlFetchApp.fetch(PUSH_URL, {
     headers: {
       "Content-Type": "application/json; charaset=UTF-8",
@@ -445,4 +447,121 @@ function setPushData(toUserId: string, message: string): void {
       ],
     }),
   });
+}
+
+// Main
+/**
+ * post action
+ * @param entry entry data
+ */
+function doPost(entry) {
+  const request = JSON.parse(entry.postData.contents).events[0];
+
+  // response token is not defined.
+  if (typeof request.replyToken === "undefined") {
+    return;
+  }
+
+  // Get reply token
+  const replyToken = request.replyToken;
+
+  // Message type is not 'text'
+  if (request.message.type !== "text") {
+    toResponse(replyToken, MSG_INCOMPATIBLE_TYPE);
+    return ContentService.createTextOutput(
+      JSON.stringify({ content: "POST OK" })
+    ).setMimeType(ContentService.MimeType.JSON);
+  }
+
+  // Trim and get text message
+  let message = request.message.text.trim();
+
+  // create instance
+  const userSession = new UserSession(request.source.userId);
+  const household = new Household();
+  const customLog = new CustomLog();
+
+  try {
+    // Session clear command
+    if (message === TYPE_CLEAR) {
+      userSession.initialize();
+      userSession.setSessionToSheet();
+
+      customLog.outLog(userSession.id, "CLEAR-INFO");
+      toResponse(replyToken, MSG_SESSION_CLEAR);
+      return ContentService.createTextOutput(
+        JSON.stringify({ content: "POST OK" })
+      ).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // Validation
+    message = formatMessage(message, userSession.demand);
+    const result = validate(message, userSession.demand);
+    if (!result.result) {
+      customLog.outLog(userSession.id, "Validation error");
+      toResponse(replyToken, result.message);
+      return ContentService.createTextOutput(
+        JSON.stringify({ content: "POST OK" })
+      ).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // Switch to do
+    let responseMessage: string = "";
+    switch (userSession.demand) {
+      case DEMAND_MONEY:
+        customLog.outLog(userSession.id, "Input Money:" + message);
+        household.setDataSheet(userSession, message);
+        responseMessage = "残金: " + household.getLastMoneyData() + "円";
+
+        // Noticicat other user
+        const userIds = userSession.getAllUserIds();
+        const mes = getPushMessage(userSession.type, responseMessage, message);
+        for (const userId of userIds) {
+          if (userId !== userSession.id) {
+            toPush(userId, mes);
+          }
+        }
+
+        userSession.initialize();
+        break;
+      case DEMAND_COMMENT:
+        customLog.outLog(userSession.id, "Input Comment:" + message);
+        responseMessage = MSG_INPUT_MONEY;
+        userSession.comment = message;
+        userSession.demand = DEMAND_MONEY;
+        break;
+      case DEMAND_TYPE:
+      default:
+        customLog.outLog(userSession.id, "Input Type:" + message);
+        if (message === TYPE_NOW) {
+          responseMessage = "現在: " + household.getLastMoneyData() + "円";
+          userSession.demand = DEMAND_TYPE;
+        } else if (
+          message === TYPE_ELECTRICITY ||
+          message === TYPE_WATER ||
+          message === TYPE_CONNECT
+        ) {
+          responseMessage = MSG_INPUT_MONEY;
+          userSession.type = message;
+          userSession.demand = DEMAND_MONEY;
+        } else {
+          responseMessage = MSG_INPUT_COMMENT;
+          userSession.type = message;
+          userSession.demand = DEMAND_COMMENT;
+        }
+        break;
+    }
+
+    // update session
+    userSession.setSessionToSheet();
+
+    // response
+    toResponse(replyToken, responseMessage);
+
+    return ContentService.createTextOutput(
+      JSON.stringify({ content: "POST OK" })
+    ).setMimeType(ContentService.MimeType.JSON);
+  } catch (exeption) {
+    customLog.errorLog(exeption);
+  }
 }
