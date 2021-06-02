@@ -1,6 +1,7 @@
 // Define token or url
-const ACCESS_TOKEN = "";
-const SPREAD_SHEET_ID = "";
+const ACCESS_TOKEN =
+  "qoLx2i8df3dqPsvTATPD+YYMu4Au+pVqlL3lLLRk+JwB77tHm4y0dHpq6rXC5Vlh703ZDoP+7TtLCjoM8r1Mh+NYX9phOGoB0MSsDcqqpzfViLOoFqHxCVOysWB9+e7uuFS2qIH4i/9y4crkC3Db2wdB04t89/1O/w1cDnyilFU=";
+const SPREAD_SHEET_ID = "1ZFRk0IsUE1JFcL1p6Bb7iaG0rCPmwtqV9XcXuNg08dU";
 const RESPONSE_URL = "https://api.line.me/v2/bot/message/reply";
 const PUSH_URL = "https://api.line.me/v2/bot/message/push";
 
