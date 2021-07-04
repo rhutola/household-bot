@@ -1,10 +1,6 @@
-// Define token or url
-const ACCESS_TOKEN =
-  "";
-const SPREAD_SHEET_ID = "";
-const TMP_FOLDER_ID ="";
-const RESPONSE_URL = "";
-const PUSH_URL = "";
+// Define url
+const RESPONSE_URL = "https://api.line.me/v2/bot/message/reply";
+const PUSH_URL = "https://api.line.me/v2/bot/message/push";
 
 // Define file name
 const EXPENDITURE_RATE_GRAPH = "Monthly_Spending_Ratio.jpeg"
